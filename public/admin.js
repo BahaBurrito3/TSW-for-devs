@@ -82,8 +82,8 @@
         <div class="card">
           <div class="empty">
             <h3>Ready for kickoff</h3>
-            <p>No season exists yet. Starting one creates empty Divisions 1–4 and the cup competitions — you add the clubs, fixtures and results.</p>
-            <div class="empty-state-cta"><button class="btn primary" id="startBtn">Start a season</button></div>
+            <p>No league season exists yet. Create the structure you need: any number of divisions, any team count, and zero or more competitions.</p>
+            <div class="empty-state-cta"><button class="btn primary" id="startBtn">Create a league</button></div>
           </div>
         </div>`;
       document.getElementById('startBtn').onclick = startSeason;
@@ -100,20 +100,22 @@
             <div style="font-weight:900;font-size:16px">${esc(s.name)}</div>
             <div class="subtle">Started ${new Date(s.created_at).toLocaleDateString()}</div>
           </div>
-          <button class="btn sm primary" data-action="new-cup">+ Cup</button>
+          <button class="btn sm primary" data-action="new-cup">+ Competition</button>
         </div>
       </div>
       <div class="section-block">
-        <div class="section-head"><h3>Divisions</h3><span class="subtle">8 clubs · 7 gameweeks · 28 matches each</span></div>
+        <div class="section-head"><h3>Divisions</h3><span class="subtle">Configured per division · no fixed team count</span></div>
         <div class="grid cols-2">
           ${leagues.map(l => {
-            const canGen = l.team_count === 8 && l.matches_total === 0;
+            const cfg = typeof l.division_config === 'string' ? JSON.parse(l.division_config || '{}') : (l.division_config || {});
+            const configuredTeams = Number(cfg.team_count) || l.team_count || 0;
+            const canGen = l.team_count >= 2 && l.matches_total === 0;
             return `
             <div class="card">
               <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
                 <span class="badge solid">${esc(l.division_code)}</span>
                 <a href="#/league/${l.id}" style="font-weight:800;font-size:15px">${esc(l.name)}</a>
-                <span class="subtle" style="margin-left:auto">${l.team_count}/8 · ${l.matches_played}/${l.matches_total}</span>
+                <span class="subtle" style="margin-left:auto">${l.team_count}/${configuredTeams || '—'} · ${l.matches_played}/${l.matches_total}</span>
               </div>
               <div class="mini-bars"><div class="mini-bar-row"><span style="width:46px">Played</span><span class="bar"><div style="width:${Math.min(100, l.matches_total ? l.matches_played / l.matches_total * 100 : 0)}%"></div></span><span class="tnum">${l.matches_played}/${l.matches_total}</span></div></div>
               <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
@@ -133,14 +135,16 @@
             <tbody>${cups.map(x => `
               <tr>
                 <td><b><a href="#/cup/${x.id}">${esc(x.name)}</a></b></td>
-                <td><span class="badge faint">${x.format === 'two_leg' ? 'Two legs' : 'Knockout'}</span></td>
+                <td><span class="badge faint">${x.format === 'two_leg' ? 'Two legs' : x.format === 'group_knockout' ? 'Groups + knockout' : 'Knockout'}</span></td>
                 <td class="num">${x.entry_count}</td>
                 <td><span class="badge">${esc(x.status)}</span></td>
                 <td style="white-space:nowrap">
+                  <button class="btn sm" data-action="edit-competition" data-id="${x.id}">Edit</button>
                   <button class="btn sm" data-action="cup-entries" data-id="${x.id}" data-name="${esc(x.name)}">Entries</button>
                   <button class="btn sm" data-action="cup-draw" data-id="${x.id}" data-name="${esc(x.name)}" ${x.entry_count < 2 ? 'disabled' : ''}>Draw</button>
                   <a class="btn sm" href="#/cup/${x.id}">Bracket</a>
-                  <button class="btn sm danger" data-action="cup-remove" data-id="${x.id}" data-name="${esc(x.name)}">Remove</button>
+                  <button class="btn sm" data-action="archive-competition" data-id="${x.id}" data-name="${esc(x.name)}">Archive</button>
+                  <button class="btn sm danger" data-action="cup-remove" data-id="${x.id}" data-name="${esc(x.name)}">Delete</button>
                 </td>
               </tr>`).join('')}</tbody></table></div>`
             : '<div class="empty"><h3>No cups</h3><p>Add a cup for this season.</p></div>'}
@@ -149,7 +153,7 @@
       <div class="section-block">
         <div class="section-head"><h3>Season rollover</h3></div>
         <div class="card">
-          <p class="subtle" style="margin:0 0 12px">After every division finishes its 28 matches, the promotion/relegation ladder runs from Division 4 up to Division 1. The completed season stays archived.</p>
+          <p class="subtle" style="margin:0 0 12px">When configured divisions are complete, preview the promotion/relegation plan before approving the next season. The completed season stays archived.</p>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn" data-action="rollover" data-id="${s.id}">Archive & roll over</button>
             <button class="btn danger" data-action="force-archive" data-id="${s.id}">Force archive</button>
@@ -159,22 +163,8 @@
   };
 
   function startSeason() {
-    window.openModal(`
-      <h3>Start a season</h3>
-      <form id="seasonForm">
-        <div class="field"><label>Season name</label><input name="name" required placeholder="e.g. Season 1"></div>
-        <div class="field"><label>Minimum rated apps for TOTW</label><input name="min_apps" type="number" min="1" value="3"></div>
-        <div class="modal-actions"><button type="button" class="btn ghost" data-close-modal>Cancel</button><button class="btn primary">Create season</button></div>
-      </form>
-    `);
-    document.getElementById('seasonForm').onsubmit = async (e) => {
-      e.preventDefault();
-      const f = new FormData(e.target);
-      try {
-        await api('/pts/initialize', 'POST', { season_name: f.get('name'), minimum_rating_apps: Number(f.get('min_apps')) || 3 });
-        window.closeModal(); window.toast('Season created', 'ok'); location.reload();
-      } catch (x) { window.toast(x.message, 'error'); }
-    };
+    if (window.openLeagueWizard) window.openLeagueWizard();
+    else window.toast('League setup is still loading. Try again.', 'error');
   }
 
   /* ---------- Club / player modals ---------- */
@@ -666,18 +656,24 @@
   /* ---------- Rollover / archive ---------- */
   function rollover(seasonId) {
     window.openModal(`
-      <h3>Roll over season</h3>
-      <p class="modal-sub">Archives the completed season and creates the next cycle with promotion/relegation applied. Every division must have all 28 results.</p>
+      <h3>Preview season rollover</h3>
+      <p class="modal-sub">The system will calculate the next division membership first. You can review the move list before approving it.</p>
       <form id="rollForm">
-        <div class="field"><label>Next season name</label><input name="name" required placeholder="e.g. Season 2"></div>
-        <div class="modal-actions"><button type="button" class="btn ghost" data-close-modal>Cancel</button><button class="btn primary">Archive & roll over</button></div>
+        <div class="field"><label>Next season name</label><input name="name" required placeholder="e.g. Spring 2027"></div>
+        <div class="modal-actions"><button type="button" class="btn ghost" data-close-modal>Cancel</button><button class="btn primary">Preview changes</button></div>
       </form>
     `);
     document.getElementById('rollForm').onsubmit = async (e) => {
       e.preventDefault();
+      const name = new FormData(e.target).get('name');
       try {
-        const r = await api('/pts/rollover', 'POST', { season_id: Number(seasonId), next_season_name: new FormData(e.target).get('name') });
-        window.closeModal(); window.toast(r.message, 'ok'); window.route();
+        const preview = await api('/pts/rollover', 'POST', { season_id: Number(seasonId), next_season_name: name, preview: true });
+        const moves = (preview.moves || []).map((m) => `<div class="subtle">${esc(m.type)} · club #${m.teamId} · configured division ${m.from + 1} → ${m.to + 1}</div>`).join('') || '<div class="subtle">No automatic moves configured.</div>';
+        window.openModal(`<h3>Approve rollover?</h3><p class="modal-sub">${esc(preview.season.name)} → ${esc(preview.next_season_name)}</p><div class="modal-scroll">${moves}</div><div class="modal-actions"><button type="button" class="btn ghost" data-close-modal>Cancel</button><button type="button" class="btn primary" id="approveRollover">Approve & create season</button></div>`);
+        document.getElementById('approveRollover').onclick = async () => {
+          try { const r = await api('/pts/rollover', 'POST', { season_id: Number(seasonId), next_season_name: name, approved: true }); window.closeModal(); window.toast(r.message, 'ok'); window.route(); }
+          catch (x) { window.toast(x.message, 'error'); }
+        };
       } catch (x) { window.toast(x.message, 'error'); }
     };
   }
@@ -696,6 +692,7 @@
     const id = el.dataset.id;
     switch (el.dataset.action) {
       case 'control': location.hash = '#/control'; break;
+      case 'new-league': startSeason(); break;
       case 'site-settings': openSiteSettings(); break;
       case 'new-club': openTeamModal(); break;
       case 'edit-club': openTeamModal(id); break;
@@ -710,6 +707,8 @@
       case 'live-match': setMatchLive(id); break;
       case 'rate-match': openRateModal(id); break;
       case 'new-cup': openCupModal(); break;
+      case 'edit-competition': if (window.openCompetitionEditor) window.openCompetitionEditor(id); break;
+      case 'archive-competition': if (window.archiveCompetition) window.archiveCompetition(id, el.dataset.name); break;
       case 'cup-entries': openCupEntries(id, el.dataset.name); break;
       case 'cup-draw': openCupDraw(id, el.dataset.name); break;
       case 'cup-remove': removeCup(id, el.dataset.name); break;

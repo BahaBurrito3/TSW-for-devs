@@ -168,7 +168,11 @@ function starBtn(kind, id, name) {
 /* ---------- Nav ---------- */
 const NAV_ITEMS = [
   { href: '#/', label: 'Scores', match: (h) => h === '#/' || h === '' || h.startsWith('#/match/') },
-  { href: '#/leagues', label: 'Leagues', match: (h) => h.startsWith('#/leagues') || h.startsWith('#/league/') || h.startsWith('#/team/') || h.startsWith('#/player/') },
+  { href: '#/leagues', label: 'Leagues', match: (h) => h.startsWith('#/leagues') || h.startsWith('#/league/') },
+  { href: '#/clubs', label: 'Clubs', match: (h) => h.startsWith('#/clubs') || h.startsWith('#/team/') },
+  { href: '#/players', label: 'Players', match: (h) => h.startsWith('#/players') || h.startsWith('#/player/') },
+  { href: '#/builder', label: 'Team Builder', match: (h) => h.startsWith('#/builder') },
+  { href: '#/competitions', label: 'Competitions', match: (h) => h.startsWith('#/competitions') || h.startsWith('#/cup/') },
   { href: '#/news', label: 'News', match: (h) => h.startsWith('#/news') },
   { href: '#/transfers', label: 'Transfers', match: (h) => h.startsWith('#/transfers') },
   { href: '#/favorites', label: 'Favorites', match: (h) => h.startsWith('#/favorites') },
@@ -176,7 +180,7 @@ const NAV_ITEMS = [
 ];
 const TAB_ITEMS = [
   { href: '#/', label: 'Scores', match: (h) => h === '#/' || h === '' || h.startsWith('#/match/') },
-  { href: '#/leagues', label: 'Leagues', match: (h) => h.startsWith('#/leagues') || h.startsWith('#/league/') || h.startsWith('#/team/') || h.startsWith('#/player/') },
+  { href: '#/leagues', label: 'Leagues', match: (h) => h.startsWith('#/leagues') || h.startsWith('#/league/') },
   { href: '#/news', label: 'News', match: (h) => h.startsWith('#/news') },
   { href: '#/favorites', label: 'Favorites', match: (h) => h.startsWith('#/favorites') },
   { href: '#/more', label: 'More', match: (h) => h.startsWith('#/more') }
@@ -195,6 +199,10 @@ async function route() {
   try {
     if (parts.length === 0) return viewScores();
     if (parts[0] === 'leagues') return viewLeagues();
+    if (parts[0] === 'clubs' && window.viewClubs) return window.viewClubs();
+    if (parts[0] === 'players' && window.viewPlayers) return window.viewPlayers();
+    if (parts[0] === 'builder' && window.viewTeamBuilder) return window.viewTeamBuilder(parts[1]);
+    if (parts[0] === 'competitions' && window.viewCompetitions) return window.viewCompetitions();
     if (parts[0] === 'league' && parts[1]) return viewLeague(parts[1], parts[2]);
     if (parts[0] === 'cup' && parts[1]) return viewCup(parts[1]);
     if (parts[0] === 'match' && parts[1]) return viewMatch(parts[1]);
@@ -330,7 +338,7 @@ async function viewLeague(id, tab) {
       <div style="display:flex;align-items:center;gap:12px">
         <div style="flex:1;min-width:0">
           <div style="font-size:19px;font-weight:900">${esc(league.name)}</div>
-          <div class="subtle">${esc(league.season || '')}${league.division_code ? ' · Division ' + esc(league.division_code.replace('D', '')) : ''}${league.format ? ' · ' + esc(league.format.replace(/_/g, ' ')) : ''}</div>
+          <div class="subtle">${esc(league.season || '')}${league.abbreviation ? ' · ' + esc(league.abbreviation) : ''}${league.format ? ' · ' + esc(league.format.replace(/_/g, ' ')) : ''}</div>
         </div>
         ${starBtn('competition', league.id, league.name)}
         <button class="btn sm admin-only" data-action="add-club" data-id="${league.id}">+ Club</button>
@@ -363,9 +371,10 @@ function renderStandings(body, stand) {
     if (sortKey !== 'position') {
       rows.sort((a, b) => { const av = a[sortKey], bv = b[sortKey]; return typeof av === 'string' ? av.localeCompare(bv) * sortDir : (av - bv) * sortDir; });
     }
-    const note = stand.league.division_code === 'D1' ? 'Champion · bottom two relegated to Division 2'
-      : stand.league.division_code === 'D4' ? 'Champion · top two promoted to Division 3'
-      : stand.league.division_code ? 'Champion · top two promoted · bottom two relegated' : 'Standings';
+    const cfg = stand.league.division_config || {};
+    const promo = Number(cfg.promotion?.automatic ?? cfg.promotion?.auto_places ?? stand.league.promotion_spots ?? 0);
+    const rel = Number(cfg.relegation?.automatic ?? cfg.relegation?.auto_places ?? stand.league.relegation_spots ?? 0);
+    const note = `Champion${promo ? ` · top ${promo} promotion place${promo === 1 ? '' : 's'}` : ''}${rel ? ` · bottom ${rel} relegation place${rel === 1 ? '' : 's'}` : ''}`;
     body.innerHTML = `
       <div class="card">
         <div class="table-wrap"><table class="standings-table">
@@ -691,7 +700,7 @@ async function viewTeam(id, tab) {
         ${crest(team.crest_url, team.name, 52)}
         <div style="flex:1;min-width:0">
           <div style="font-size:20px;font-weight:900">${esc(team.name)}${team.short_name ? ` <span class="badge faint">${esc(team.short_name)}</span>` : ''}</div>
-          <div class="subtle">${team.division_code ? 'Division ' + esc(team.division_code.replace('D', '')) + ' · ' : ''}${team.manager ? 'Manager: ' + esc(team.manager) + ' · ' : ''}${players.length} players</div>
+          <div class="subtle">${team.division_code ? esc(team.abbreviation || team.division_code) + ' · ' : ''}${team.manager ? 'Manager: ' + esc(team.manager) + ' · ' : ''}${players.length} players</div>
           <div style="display:flex;gap:6px;margin-top:7px">
             <span class="chip" style="cursor:default">Home <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${esc(team.home_color || '#05C08A')};vertical-align:-1px"></span></span>
             <span class="chip" style="cursor:default">Away <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${esc(team.away_color || '#0B0F14')};vertical-align:-1px"></span></span>

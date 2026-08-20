@@ -4,30 +4,32 @@ import { withMediaMany } from "../../lib/media.js";
 export const access = "public";
 export const methods = ["GET"];
 
+const order = "CASE p.position WHEN 'GK' THEN 0 WHEN 'RB' THEN 1 WHEN 'CB' THEN 2 WHEN 'LB' THEN 3 WHEN 'CM' THEN 4 WHEN 'ST' THEN 5 END, p.name";
+const media = ["avatar_url", "crest_url"];
+
 export default async function (req, res) {
-  const { team_id, league_id } = req.query;
-  if (team_id) {
-    const { rows } = await db.query(
-      `SELECT p.*, t.name AS team_name, t.crest_url FROM players p LEFT JOIN teams t ON t.id = p.team_id WHERE p.team_id = $1 ORDER BY
-         CASE position WHEN 'GK' THEN 0 WHEN 'RB' THEN 1 WHEN 'CB' THEN 2 WHEN 'LB' THEN 3 WHEN 'CM' THEN 4 WHEN 'ST' THEN 5 END,
-         shirt_number NULLS LAST`,
-      [team_id]
-    );
-    res.json(await withMediaMany(rows, ["avatar_url", "crest_url"]));
-    return;
-  }
+  const { team_id, league_id, search, position, country } = req.query;
+  const params = [];
+  const clauses = [];
+  if (team_id) { params.push(team_id); clauses.push(`p.team_id=$${params.length}`); }
   if (league_id) {
-    const { rows } = await db.query(
-      `SELECT p.*, t.name AS team_name FROM players p
-       JOIN teams t ON t.id = p.team_id
-       JOIN league_teams lt ON lt.team_id = t.id
-       WHERE lt.league_id = $1
-       ORDER BY t.name, p.shirt_number NULLS LAST`,
-      [league_id]
-    );
-    res.json(await withMediaMany(rows, ["avatar_url"]));
-    return;
+    params.push(league_id);
+    clauses.push(`EXISTS (SELECT 1 FROM league_teams ltx WHERE ltx.league_id=$${params.length} AND ltx.team_id=t.id)`);
   }
-  const { rows } = await db.query(`SELECT p.*, t.name AS team_name, t.crest_url FROM players p LEFT JOIN teams t ON t.id = p.team_id ORDER BY t.name NULLS FIRST, p.name`);
-  res.json(await withMediaMany(rows, ["avatar_url", "crest_url"]));
+  if (search) {
+    params.push(`%${String(search).toLowerCase()}%`);
+    clauses.push(`(LOWER(p.name) LIKE $${params.length} OR LOWER(COALESCE(t.name,'')) LIKE $${params.length} OR LOWER(COALESCE(p.country,'')) LIKE $${params.length})`);
+  }
+  if (position) { params.push(position); clauses.push(`p.position=$${params.length}`); }
+  if (country) { params.push(`%${String(country).toLowerCase()}%`); clauses.push(`LOWER(COALESCE(p.country,'')) LIKE $${params.length}`); }
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const { rows } = await db.query(
+    `SELECT p.*, t.name AS team_name, t.crest_url,
+       COALESCE((SELECT ROUND(AVG(pr.rating),1) FROM player_ratings pr WHERE pr.player_id=p.id),0) AS rating,
+       COALESCE((SELECT COUNT(*)::int FROM player_ratings pr WHERE pr.player_id=p.id),0) AS apps
+     FROM players p LEFT JOIN teams t ON t.id=p.team_id ${where}
+     ORDER BY t.name NULLS FIRST, ${order}`,
+    params
+  );
+  res.json(await withMediaMany(rows, media));
 }
